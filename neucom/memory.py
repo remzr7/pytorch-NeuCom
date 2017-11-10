@@ -30,13 +30,13 @@ class Memory(nn.Module):
         if self.use_cuda:
             self.I = self.I.cuda()
             #self.index_mapper  = self.index_mapper.cuda()
-            
+
         self.memory_tuple = namedtuple('mem_tuple', 'mem_mat, mem_usage, pre_vec, \
                                         link_mat, write_weight, read_weight, read_vec')
 
     def init_memory(self,batch_size):
         """
-        return a tuple of the intial values pertinetn to 
+        return a tuple of the intial values pertinetn to
         the memorys
         Returns: namedtuple('mem_tuple', 'mem_mat, mem_usage, pre_vec, \
                             link_mat, write_weight, read_weight, read_vec')
@@ -46,7 +46,7 @@ class Memory(nn.Module):
             Variable(torch.zeros(batch_size, self.mem_slot), requires_grad = True), #initial memory usage vector
             Variable(torch.zeros(batch_size, self.mem_slot), requires_grad = True), #initial precedence vector
             Variable(torch.zeros(batch_size, self.mem_slot, self.mem_slot), requires_grad = True), #initial link matrix
-            
+
             Variable(torch.zeros(batch_size, self.mem_slot).fill_(1e-6), requires_grad = True), #initial write weighting
             Variable(torch.zeros(batch_size, self.mem_slot, self.read_heads).fill_(1e-6), requires_grad = True), #initial read weighting
             Variable(torch.zeros(batch_size, self.mem_size, self.read_heads).fill_(1e-6), requires_grad = True)
@@ -54,10 +54,10 @@ class Memory(nn.Module):
         if self.use_cuda:
             for ind in range(len(mem_list)):
                 mem_list[ind] = mem_list[ind].cuda()
-                
+
         return self.memory_tuple._make(mem_list)
 
-        
+
     def get_content_address(self, memory_matrix, query_keys, strengths):
         """
         retrives a content-based adderssing weights given the keys
@@ -70,13 +70,13 @@ class Memory(nn.Module):
             the keys to query the memory with
         strengths: Tensor (batch_size, number_of_keys, )
             the list of strengths for each lookup query_keys
-        
+
         Returns: Tensor (batch_size, mem_slot, number_of_keys)
             The list of lookup weightings for each provided key
         """
         # cos_dist is (batch_size, mem_slot, number_of_keys)
         cos_dist = cosine_distance(memory_matrix, query_keys)
-        
+
         strengths = expand_dims(strengths, 1).expand_as(cos_dist)
         #apply_dict(locals())
         return softmax(cos_dist*strengths, 1)
@@ -99,7 +99,7 @@ class Memory(nn.Module):
         free_gates = expand_dims(free_gates,1).expand_as(read_weights)
         retention_vector = torch.prod(2- read_weights * free_gates, 2)
         updated_usage = (usage_vector + write_weight - usage_vector * write_weight)  * retention_vector
-        #apply_dict(locals())                
+        #apply_dict(locals())
         return updated_usage
 
     def get_allocation_weight(self, sorted_usage, free_list):
@@ -127,7 +127,7 @@ class Memory(nn.Module):
         index_mapper = Variable(
             torch.from_numpy(np.cumsum([0] + [self.mem_slot] * (batch_size - 1))[:, np.newaxis]),  requires_grad = False
         ).expand(batch_size, self.mem_slot)
-        
+
         #index_mapper = index_mapper.cuda(free_list.get_device()) if free_list.is_cuda else index_mapper
         index_mapper = to_device(index_mapper, free_list)
         mapped_free_list = free_list + index_mapper
@@ -170,13 +170,13 @@ class Memory(nn.Module):
         first_2_size = lookup_weight.size()[0:2]
         lookup_weight = lookup_weight.view(*first_2_size)
         alloc_wshape = allocation_weight.size()
-        
+
         expand_ag = allocation_gate.expand(*alloc_wshape)
         updated_write_weight = write_gate.expand(*alloc_wshape) * ( expand_ag * \
                                allocation_weight + (1 - expand_ag) * lookup_weight)
-        
+
         #apply_dict(locals())
-        
+
         return updated_write_weight
 
     def update_memory(self, memory_matrix, write_weight, write_vector, erase_vector):
@@ -208,7 +208,7 @@ class Memory(nn.Module):
         erasing = memory_matrix * (1 - torch.bmm(write_weight, erase_vector))
         writing = torch.bmm(write_weight, write_vector)
         updated_memory = erasing + writing
-        
+
         #apply_dict(locals())
         return updated_memory
 
@@ -231,9 +231,9 @@ class Memory(nn.Module):
         reset_factor = 1 - reduce_sum(write_weight, 1, keep_dim=True)
         updated_precedence_vector = reset_factor.expand_as(precedence_vector) * \
                                     precedence_vector + write_weight
-        #apply_dict(locals())                                                
+        #apply_dict(locals())
         return updated_precedence_vector
-    
+
     def update_link_matrix(self, precedence_vector, link_matrix, write_weight):
         """
         updates and returns the temporal link matrix for the latest write
@@ -252,20 +252,20 @@ class Memory(nn.Module):
             the updated temporal link matrix
         """
 
-        
+
         precedence_vector = expand_dims(precedence_vector, 1)
 
         reset_factor = 1 - pairwise_add(write_weight, is_batch=True)
-        
+
         write_weight = expand_dims(write_weight, -1)
 
         updated_link_matrix = reset_factor * link_matrix + torch.bmm(write_weight, precedence_vector)
         updated_link_matrix = (1 - self.I).expand_as(updated_link_matrix) * updated_link_matrix  # eliminates self-links
-        
+
         #apply_dict(locals())
-        
+
         return updated_link_matrix
-    
+
     def get_directional_weights(self, read_weights, link_matrix):
         """
         computes and returns the forward and backward reading weights
@@ -311,7 +311,7 @@ class Memory(nn.Module):
         lookup_mode   = expand_dims(read_mode[:, 1, :].contiguous(), 1).expand_as(lookup_weights)  * lookup_weights
         forward_mode  = expand_dims(read_mode[:, 2, :].contiguous(), 1).expand_as(forward_weight)  * forward_weight
         updated_read_weights = backward_mode + lookup_mode + forward_mode
-        
+
         #apply_dict(locals())
         return updated_read_weights
 
@@ -330,12 +330,12 @@ class Memory(nn.Module):
         """
 
         updated_read_vectors = torch.bmm(memory_matrix.transpose(1,2), read_weights)
-        
+
         #apply_dict(locals())
-        
+
         return updated_read_vectors
 
-    
+
     def write(self, memory_matrix, usage_vector, read_weights, write_weight,
               precedence_vector, link_matrix,  key, strength, free_gates,
               allocation_gate, write_gate, write_vector, erase_vector):
@@ -387,12 +387,12 @@ class Memory(nn.Module):
         # sort the memory usage vector, it's leaft node, superisingly the mode is sitll differentiable.
         np_new_usage_vec = new_usage_vector.cpu().data.numpy()
         sort_list = np.argsort(np_new_usage_vec, axis = -1)
-        
+
         #free_list = Variable(new_usage_vector.data.new(*(sort_list.shape))).long()
         free_list = Variable(torch.from_numpy(sort_list)).long()
         free_list = to_device(free_list,new_usage_vector )
         sorted_usage = torch.gather(new_usage_vector,1,  free_list)
-        
+
         #sorted_usage, free_list = top_k(-1 * new_usage_vector, self.mem_slot)
         #sorted_usage = -1 * sorted_usage
 
@@ -401,7 +401,7 @@ class Memory(nn.Module):
         new_memory_matrix = self.update_memory(memory_matrix, new_write_weight, write_vector, erase_vector)
         new_link_matrix = self.update_link_matrix(precedence_vector, link_matrix, new_write_weight)
         new_precedence_vector = self.update_precedence_vector(precedence_vector, new_write_weight)
-        
+
         #apply_dict(locals())
         return new_usage_vector, new_write_weight, new_memory_matrix, new_link_matrix, new_precedence_vector
 
@@ -436,4 +436,3 @@ class Memory(nn.Module):
         new_read_vectors = self.update_read_vectors(memory_matrix, new_read_weights)
         #apply_dict(locals())
         return new_read_weights, new_read_vectors
-

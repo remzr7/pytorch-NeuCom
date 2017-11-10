@@ -9,9 +9,9 @@ from neucom.utils import *
 from neucom.memory import Memory
 
 class DNC(nn.Module):
-    def __init__(self, nhid=64, nn_output_size = 64, nlayer=1, controller_class = None, 
-                 input_size = 10, output_size = 10, mem_slot = 256, 
-                 mem_size = 64, read_heads = 4, batch_size = 1, use_cuda=True):
+    def __init__(self, nhid=64, nn_output_size = 64, nlayer=1, controller_class = None,
+                 input_size = 10, output_size = 10, mem_slot = 256,
+                 mem_size = 64, read_heads = 4, batch_size = 1, use_cuda=False):
         """
         The agent class.
 
@@ -43,19 +43,19 @@ class DNC(nn.Module):
         self.controller = self.controller_class(
                                 nhid           = self.nhid,
                                 nlayer         = self.nlayer,
-                                input_size     = self.input_size, 
+                                input_size     = self.input_size,
                                 output_size    = self.output_size,
                                 read_heads     = self.read_heads,
                                 nn_output_size = self.nn_output_size,
-                                mem_size       = self.mem_size, 
+                                mem_size       = self.mem_size,
                                 batch_size     = self.batch_size
                             )
         #apply_dict(locals())
-        
+
     def forward(self, input_data, mask=None):
         time_step = input_data.size()[0]
         batch_size = input_data.size()[1]
-        
+
         memory_state = self.memory.init_memory(batch_size)
         controller_state = self.controller.get_state(batch_size) if \
                            self.controller.recurrent \
@@ -68,7 +68,7 @@ class DNC(nn.Module):
         read_weights_time = [[]]*time_step
         write_weights_time = [[]]*time_step
         usage_vectors_time = [[]]*time_step
-        
+
         last_read_vectors = memory_state.read_vec
         mem_mat = memory_state.mem_mat
         mem_usage = memory_state.mem_usage
@@ -79,26 +79,26 @@ class DNC(nn.Module):
 
         pre_output, interface, nn_state = None, None, None
         #TODO: perform matmul(input, W) before loops
-        
+
         for time in range(time_step):
             step_input = input_data[time]
-                  
+
             if self.controller.recurrent:
                 pre_output, interface, nn_state = self.controller.process_input(step_input, \
                                                     last_read_vectors, controller_state)
             else:
                 pre_output, interface = self.controller.process_input(step_input, last_read_vectors)
-            
+
             usage_vector, write_weight, mem_mat, \
             link_mat, pre_vec = self.memory.write \
                                             (
-                                                mem_mat, 
-                                                mem_usage, 
+                                                mem_mat,
+                                                mem_usage,
                                                 read_weight,
-                                                write_weight, 
-                                                pre_vec, 
+                                                write_weight,
+                                                pre_vec,
                                                 link_mat,
-                                                
+
                                                 interface['write_key'],
                                                 interface['write_strength'],
                                                 interface['free_gates'],
@@ -107,7 +107,7 @@ class DNC(nn.Module):
                                                 interface['write_vector'],
                                                 interface['erase_vector']
                                             )
-                                            
+
             read_weight, last_read_vectors = self.memory.read \
                                             (
                                                 mem_mat,
@@ -117,8 +117,8 @@ class DNC(nn.Module):
                                                 link_mat,
                                                 interface['read_modes'],
                                             )
-            
-            
+
+
             outputs_time[time] =  self.controller.final_output(pre_output, last_read_vectors).clone()
             free_gates_time[time] = interface['free_gates'].clone()
             allocation_gates_time[time] = interface['allocation_gate'].clone()
@@ -126,13 +126,13 @@ class DNC(nn.Module):
             read_weights_time[time] = read_weight.clone()
             write_weights_time[time] = write_weight.clone()
             usage_vectors_time[time] = usage_vector.clone()
-            
+
             controller_state = (
                                 nn_state[0] if nn_state is not None else torch.zeros(1),
                                 nn_state[1] if nn_state is not None else torch.zeros(1)
                                 )
 
-        
+
 
         packed_output = torch.stack(outputs_time)
         packed_memory_view = {
@@ -145,15 +145,14 @@ class DNC(nn.Module):
         }
 
         #apply_dict(locals())
-        return   packed_output,  packed_memory_view 
+        return   packed_output,  packed_memory_view
 
     def save(self, ckpts_dir, name):
         raise NotImplementedError
-    
+
     def restore(self, ckpts_dir, name):
-        raise NotImplementedError
+        w = torch.load(ckpts_dir+name)
+        self.load_state_dict(w)
 
     #def __call__(self,*args, **kwargs):
     #    return self.forward(*args, **kwargs)
-
-
